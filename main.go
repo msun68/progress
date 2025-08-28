@@ -44,6 +44,9 @@ type model struct {
 	msgCh     chan tea.Msg
 	cancelled bool
 	done      bool
+	// hideBar avoids showing the bar for up-to-date pulls
+	hideBar     bool
+	sawDownload bool
 }
 
 func initialModel(image string) model {
@@ -146,10 +149,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case progressEvent:
-		// Track layers and compute overall percent
-		if strings.Contains(strings.ToLower(msg.status), "pulling from") {
+		lowerStatus := strings.ToLower(msg.status)
+		if strings.Contains(lowerStatus, "pulling from") {
 			// ignore top-level header
 			return m, waitForMsg(m.msgCh)
+		}
+		if strings.Contains(lowerStatus, "image is up to date") {
+			m.hideBar = true
+		}
+		if strings.Contains(lowerStatus, "download") || strings.Contains(lowerStatus, "extract") {
+			m.sawDownload = true
 		}
 		if msg.id != "" {
 			ls := m.layers[msg.id]
@@ -187,13 +196,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sumTotal += ls.total
 			}
 		}
+		// If all done and we never downloaded anything, hide the bar entirely
+		if allDone && !m.sawDownload {
+			m.hideBar = true
+		}
 		var cmds []tea.Cmd
 		if sumTotal > 0 {
 			pct := float64(sumCurrent) / float64(sumTotal)
 			if !allDone && pct >= 0.999 {
 				pct = 0.99
 			}
-			// Monotonic clamp at parent level too
 			if pct < m.pl.Percent {
 				pct = m.pl.Percent
 			}
@@ -224,6 +236,10 @@ func (m model) View() string {
 	}
 	if m.done {
 		return fmt.Sprintf("Pulling %s...DONE\n", m.image)
+	}
+	// If we haven't seen any downloading/extracting yet, or we've determined the image is up to date, hide the bar
+	if m.hideBar || !m.sawDownload {
+		return fmt.Sprintf("Pulling %s...\n", m.image)
 	}
 	return m.pl.View()
 }
