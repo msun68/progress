@@ -193,6 +193,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !allDone && pct >= 0.999 {
 				pct = 0.99
 			}
+			// Monotonic clamp at parent level too
+			if pct < m.pl.Percent {
+				pct = m.pl.Percent
+			}
 			if c, handled := m.pl.Update(ui.SetPercentMsg{Pct: pct}); handled {
 				cmds = append(cmds, c)
 			}

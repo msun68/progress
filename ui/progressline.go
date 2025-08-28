@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -15,30 +17,32 @@ type DoneMsg struct{}
 // CancelMsg requests cancellation from the parent model (e.g., on Esc).
 type CancelMsg struct{}
 
-// ProgressLine is a reusable single-line progress component that renders:
+// ProgressLine is a reusable single-line progress component that renders a Bubble Tea progress bar.
 //
-//	Label...[====>] XX%
+//	Label... <bar>
 //
 // It can be reused for any long-running task, not just docker pulls.
 type ProgressLine struct {
 	Label   string
+	Bar     progress.Model
 	Percent float64
 	Done    bool
-	Width   int
 }
 
 // NewProgressLine creates a new progress line with a label.
 func NewProgressLine(label string) *ProgressLine {
 	pl := &ProgressLine{
 		Label:   label,
+		Bar:     progress.New(progress.WithWidth(40), progress.WithSolidFill("#888888")),
 		Percent: 0,
-		Width:   40,
 	}
 	return pl
 }
 
-// InitCmd returns an optional command (no-op here).
-func (p *ProgressLine) InitCmd() tea.Cmd { return nil }
+// InitCmd returns a tick command you can use in your parent model to drive animations.
+func (p *ProgressLine) InitCmd() tea.Cmd {
+	return tea.Tick(time.Millisecond*100, func(time.Time) tea.Msg { return progress.FrameMsg{} })
+}
 
 // Update handles Bubble Tea messages for this component.
 func (p *ProgressLine) Update(msg tea.Msg) (tea.Cmd, bool) {
@@ -59,44 +63,32 @@ func (p *ProgressLine) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if pct > 1 {
 			pct = 1
 		}
+		// Monotonic: never decrease
+		if pct < p.Percent {
+			return nil, true
+		}
 		p.Percent = pct
 		if pct >= 1 {
 			p.Done = true
 		}
-		return nil, true
+		return p.Bar.SetPercent(p.Percent), true
 	case DoneMsg:
 		p.Percent = 1
 		p.Done = true
-		return nil, true
+		return p.Bar.SetPercent(1), true
+	case progress.FrameMsg:
+		var cmd tea.Cmd
+		var nxt tea.Model
+		nxt, cmd = p.Bar.Update(m)
+		if b, ok := nxt.(progress.Model); ok {
+			p.Bar = b
+		}
+		return cmd, true
 	}
 	return nil, false
 }
 
-func asciiBar(pct float64, width int) string {
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 1 {
-		pct = 1
-	}
-	filled := int(pct * float64(width))
-	if filled > width {
-		filled = width
-	}
-	bar := make([]rune, width)
-	for i := 0; i < width; i++ {
-		bar[i] = ' '
-	}
-	if filled > 0 {
-		for i := 0; i < filled-1; i++ {
-			bar[i] = '='
-		}
-		bar[filled-1] = '>'
-	}
-	return string(bar)
-}
-
 // View returns the single-line string for this component.
 func (p *ProgressLine) View() string {
-	return fmt.Sprintf("%s...[%s] %3.0f%%", p.Label, asciiBar(p.Percent, p.Width), p.Percent*100)
+	return fmt.Sprintf("%s... %s", p.Label, p.Bar.ViewAs(p.Percent))
 }
